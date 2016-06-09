@@ -4,6 +4,8 @@ Written by Andreas Sandaa Hagen during an intership at EVI ski A/S summer 2016
 
 Press is controlled with seperate PID loops for the top and base, type K thermocouplers is used to gage the temperatures.
 
+endrer litt i toppen bare for å endre noe
+
 Inspiration and parts of code gotten from:
 
 Hedinn Gunhildrud's scetch PID_kontroller_v5.ino
