@@ -139,7 +139,7 @@ const int kdAddressb = 72;
 // 02 LCD setup
 // =============================
 #include <LiquidCrystal.h>
-LiquidCrystal lcd(42,43,44,45,46,47);
+LiquidCrystal lcd(7, 8, 9, 10, 11, 12);
 
 // =============================
 //  02.1 Custom symbols
