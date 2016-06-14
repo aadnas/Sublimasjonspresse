@@ -291,7 +291,7 @@ float printTime; // Variable to calculate the print time.
 // handels temperature and switches
 SIGNAL(TIMER2_OVF_vect) {
   check_switches();
-  get_temp();
+//  get_temp();
 
   if (opState == STARTUP)
   {
@@ -313,6 +313,16 @@ unsigned long ticktime3;
 void count(){
   ticktime3 = ticktime3 +1;
 TCNT3 = 49910; // Set to 1 second. Calculated as =65536-(16MHz/(1024 prescaler*1Hz))-1
+}
+SIGNAL(TIMER4_OVF_vect){
+  TCNT4 = 62410;
+  get_temp();
+  Serial.print("Topp: ");
+  Serial.print(tmpcT);
+  Serial.print(" Bunn: ");
+  Serial.println(tmpcB);
+
+//TCNT4= 13452;
 }
 // =============================
 // 08 setup
@@ -407,9 +417,17 @@ noInterrupts();
   TCCR3B = 0;
 
   //TCNT1 = 49911;
-  TCCR3B |= (1<< CS12);
-  TCCR3B |= (1<< CS10);
-  TIMSK3 |= (1<< TOIE1);
+  TCCR3B |= (1<< CS32);
+  TCCR3B |= (1<< CS30);
+  TIMSK3 |= (1<< TOIE4);
+
+  TCCR4A = 0;
+  TCCR4B = 0;
+
+  TCCR4B |= (1<< CS42);
+  TCCR4B |= (1<< CS40);
+  TIMSK4 |= (1<< TOIE4);
+
 
 interrupts();
  // ============================
@@ -1226,18 +1244,18 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (setPointB >= 100){
-          lcd.setCursor(10,1);
+          lcd.setCursor(11,1);
         }
         if(setPointB >= 10){
           lcd.print(" ");
-          lcd.setCursor(11,1);
+          lcd.setCursor(12,1);
         }
         if(setPointB < 10){
           lcd.print("  ");
-          lcd.setCursor(12,1);
+          lcd.setCursor(13,1);
         }
         lcd.print((byte)setPointB,DEC);
-        lcd.setCursor(13,1);
+        lcd.setCursor(14,1);
         lcd.print(byte(0));
       }
    // =============================
