@@ -271,10 +271,10 @@ volatile byte pressed[NUMBUTTONS], justpressed[NUMBUTTONS], justreleased[NUMBUTT
 // Variabler for knapper
 //
 
-long buttonPushTime; // Variable that stores the time when a button was pressed
+unsigned long buttonPushTime; // Variable that stores the time when a button was pressed
 
-long buttonPushTime2; // Variable that stores the time when a button was pressed
-long buttonDelay = 500; // Delay before a value is set, starts when a button is pressed
+unsigned long buttonPushTime2; // Variable that stores the time when a button was pressed
+int buttonDelay = 500; // Delay before a value is set, starts when a button is pressed
 
 // =============================
 // 06 Serial setup
