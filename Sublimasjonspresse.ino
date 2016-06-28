@@ -79,6 +79,7 @@ Scetch layout
    14.3 Floating
      14.3.1 Writing
      14.3.2 Reading
+ 15 Datalog
 */
 
 
@@ -134,6 +135,7 @@ const int tkAddressb = 48;
 const int kpAddressb = 56;
 const int kiAddressb = 64;
 const int kdAddressb = 72;
+const int stimAddress = 80;
 
 // =============================
 // 02 LCD setup
@@ -207,15 +209,19 @@ int blinkNo;
   PID PIDB(&InputB, &OutputB, &setPointB, KpB, KiB, KdB, DIRECT);
 
   // Time Proportional Output window.
-  int WindowSize = 10000;
-  unsigned long windowStartTime;
+  int WindowSizeT = 1000;
+  unsigned long windowStartTimeT;
+  int WindowSizeB = 1000;
+  unsigned long windowStartTimeB;
 
   // Relay pin, control with optocoupler
   #define relayPinT 28
   #define relayPinB 30
   int relayStateT = 0; // Relay sate, 0 = off, 1 = on
   int relayStateB = 0; // Relay sate, 0 = off, 1 = on
-
+// Relay indication pins
+  #define redLEDpinT 6
+  #define redLEDpinB 5
 // Thermocouple - Adafruit_MAX31855
   #include <SPI.h>
   #include "Adafruit_MAX31855.h"
@@ -230,7 +236,9 @@ int blinkNo;
   Adafruit_MAX31855 thermocoupleB(MAXCLK, MAXCSB, MAXDO);
 // Solenoid
   #define solenoidPin 26
-  int stime = 0;
+  #define solenoidled 13
+  int solenoidState = 0;
+  int stime = 60;
 
 // =============================
 // 04 States for PID-controller and temperature reader setup
@@ -239,7 +247,7 @@ int blinkNo;
 enum operatingState { STARTUP = 0,
  TURN_ON_PID, RUN_PID, C_PT, C_IT, C_DT, C_PB, C_IB, C_DB, C_MTOP, C_MBASE, C_MTIME,  START_PROG1,
  START_PROG2, START_PROG3, C_TMPT, C_TMPB, TURN_OFF,
- SETPOINT1, SETPOINT2, PROGRAM, CALIBRATE, MANUALS
+ SETPOINT1, SETPOINT2, PROGRAM, CALIBRATE, MANUALS, SOLENOID
 };
 operatingState opState = STARTUP;
 
@@ -280,7 +288,7 @@ long buttonDelay = 500; // Delay before a value is set, starts when a button is 
 // 06 Serial setup
 // =============================
 
-const int printDelay = 10000; // Print to serial timer.
+const int printDelay = 1000; // Print to serial timer.
 float printTime; // Variable to calculate the print time.
 
 // =============================
@@ -291,7 +299,7 @@ float printTime; // Variable to calculate the print time.
 // handels temperature and switches
 SIGNAL(TIMER2_OVF_vect) {
   check_switches();
-  get_temp();
+//  get_temp();
 
   if (opState == STARTUP)
   {
@@ -300,12 +308,13 @@ SIGNAL(TIMER2_OVF_vect) {
   }
   else
   {
-    drive_output();
+    drive_outputT();
+    drive_outputB();
   }
 } // Signal Timer SLUTT
 
 // Timer 3
-// handels the timer for the solenoid
+// Handles the timer for the solenoid
 SIGNAL(TIMER3_OVF_vect){
   count();
 }
@@ -313,6 +322,12 @@ unsigned long ticktime3;
 void count(){
   ticktime3 = ticktime3 +1;
 TCNT3 = 49910; // Set to 1 second. Calculated as =65536-(16MHz/(1024 prescaler*1Hz))-1
+}
+SIGNAL(TIMER4_OVF_vect){
+  TCNT4 = 62410; // 5 Hz
+//  TCNT4 = 63303; // 7 Hz
+  get_temp();
+//TCNT4= 13452;
 }
 // =============================
 // 08 setup
@@ -322,29 +337,29 @@ void setup() {
  // =============================
  // 08.1 PID initiation
  // =============================
- windowStartTime = millis();
+ windowStartTimeT = millis();
+ windowStartTimeB = millis();
  LoadParameters();
  PIDT.SetTunings(KpT,KiT,KdT);
  PIDT.SetSampleTime(1000);
 
- PIDT.SetOutputLimits(0, WindowSize);
+ PIDT.SetOutputLimits(0, WindowSizeT);
  PIDT.SetMode(MANUAL);
 
- LoadParameters();
  PIDB.SetTunings(KpB,KiB,KdB);
  PIDB.SetSampleTime(1000);
 
- PIDB.SetOutputLimits(0, WindowSize);
+ PIDB.SetOutputLimits(0, WindowSizeB);
  PIDB.SetMode(MANUAL);
  // =============================
  // 08.2 Relay initiation
  // =============================
  pinMode(relayPinT, OUTPUT);
  digitalWrite(relayPinT, LOW);
- relayStateT = 0;
+ pinMode(redLEDpinT, OUTPUT);
  pinMode(relayPinB, OUTPUT);
  digitalWrite(relayPinB, LOW);
- relayStateB = 0;
+ pinMode(redLEDpinB, OUTPUT);
 
  // =============================
  // 08.3 Serial initiation
@@ -352,6 +367,10 @@ void setup() {
 
  Serial.begin(9600);
  printTime = millis();
+ // Relay states
+ relayStateT = 0;
+ relayStateB = 0;
+ solenoidState = 0;
 
  // =============================
  // 08.4 LCD setup, custom symbols and splash screen
@@ -407,9 +426,17 @@ noInterrupts();
   TCCR3B = 0;
 
   //TCNT1 = 49911;
-  TCCR3B |= (1<< CS12);
-  TCCR3B |= (1<< CS10);
-  TIMSK3 |= (1<< TOIE1);
+  TCCR3B |= (1<< CS32);
+  TCCR3B |= (1<< CS30);
+  TIMSK3 |= (1<< TOIE4);
+
+  TCCR4A = 0;
+  TCCR4B = 0;
+
+  TCCR4B |= (1<< CS42);
+  TCCR4B |= (1<< CS40);
+  TIMSK4 |= (1<< TOIE4);
+
 
 interrupts();
  // ============================
@@ -417,6 +444,8 @@ interrupts();
  //=============================
 pinMode(solenoidPin, OUTPUT);
 digitalWrite(solenoidPin, LOW);
+pinMode(solenoidled, OUTPUT);
+digitalWrite(solenoidled, LOW);
 
 
 delay(1000);
@@ -459,8 +488,7 @@ void loop() {
       case 5:
         lcd.clear();
         ticktime3 = 0;
-        solenoid();
-        opState = RUN_PID;
+        opState = SOLENOID;
     }
     justreleased[i]=0;
     }
@@ -571,23 +599,29 @@ void loop() {
   case SETPOINT2:
     setpoint2();
     break;
+  case SOLENOID:
+    solenoid();
+    break;
  }
  // =============================
- // 09.3 Print to serial
+ // 09.3 Datalog
  // =============================
-
+ if (printTime + printDelay <= millis()){
+   logData();
+   printTime = millis();
+   }
  // =============================
  // 09.4 Emergency shutoff
  // =============================
-
- if (tempAvgT >= 205){
+/*
+ if (tempAvgT >= 215){
    emergency_off();
  }
- if (tempAvgB >= 205){
+ if (tempAvgB >= 215){
    emergency_off();
  }
  delay(1);
-
+*/
 }
 
 // =============================
@@ -598,9 +632,11 @@ void emergency_off(){
   PIDT.SetMode(MANUAL);
   digitalWrite(relayPinT, LOW);
   relayStateT = 0;
+  digitalWrite(redLEDpinT, LOW);
   PIDB.SetMode(MANUAL);
   digitalWrite(relayPinB, LOW);
   relayStateB = 0;
+  digitalWrite(redLEDpinB, LOW);
 
   lcd.clear();
   lcd.setCursor(0,0);
@@ -616,7 +652,7 @@ void emergency_off(){
   opState = STARTUP;
 
 blinkNo = 0;
-  while(blinkNo < 10){
+  while(blinkNo < 7){
   lcd.clear();
     delay(500);
   lcd.setCursor(0,0);
@@ -653,13 +689,19 @@ char message[] = "Sublimasjonspresse";
    relayStateT = 0;
    digitalWrite(relayPinB, LOW);
    relayStateB = 0;
-   for (int printStart = 15; printStart >= 0; printStart--)  {
+   /*for (int printStart = 15; printStart >= 0; printStart--)  {
      showLetters(printStart, 0);
    }
    for (int letter = 1; letter <= strlen(message); letter++) {
      showLetters(0, letter);
-   }
+   }*/
+   lcd.setCursor(4,0);
+   lcd.print("EVI  Ski");
+   lcd.setCursor(3,1);
+   lcd.print("Trykk  set");
+
  }
+
 
  void showLetters(int printStart, int startLetter) {
   lcd.setCursor(4,0);
@@ -679,7 +721,8 @@ char message[] = "Sublimasjonspresse";
  void turn_on_pid()  {
    PIDT.SetMode(AUTOMATIC);
    PIDB.SetMode(AUTOMATIC);
-   windowStartTime = millis();
+   windowStartTimeT = millis();
+   windowStartTimeB = millis();
    opState = RUN_PID;
    lcd.clear();
  }
@@ -693,16 +736,31 @@ char message[] = "Sublimasjonspresse";
    lcd.setCursor(0,1);
    lcd.print("T: ");
    if (tempAvgT != tempAvgPrevT) {
-    lcd.setCursor(3,1);
-    lcd.print((byte)tempAvgT);
+     lcd.setCursor(3,1);
+     if (tempAvgT < 100){
+       lcd.print(" ");
+     }
+     if (tempAvgT < 10){
+       lcd.print("  ");
+     }
+      lcd.print((byte)tempAvgT);
+    lcd.setCursor(6,1);
     lcd.write(byte(0));
   }
  lcd.setCursor(7,1);
  lcd.print(" B: ");
   if (tempAvgB != tempAvgPrevB) {
     lcd.setCursor(11,1);
+    if (tempAvgB < 100){
+      lcd.print(" ");
+    }
+    if (tempAvgB < 10){
+      lcd.print("  ");
+    }
     lcd.print((byte)tempAvgB);
+    lcd.setCursor(14,1);
     lcd.write(byte(0));
+    lcd.print(" ");
   }
     run_pid_compute();
 
@@ -721,26 +779,41 @@ char message[] = "Sublimasjonspresse";
  // =============================
  //   11.3.2 PID relay control
  // =============================
- void drive_output() {
+ void drive_outputT() {
    unsigned long now = millis();
+   if(now - windowStartTimeT>WindowSizeT)
    {
-     windowStartTime += WindowSize;
+     windowStartTimeT += WindowSizeT;
    }
-   if (OutputT > now - windowStartTime){
+   if (OutputT > now - windowStartTimeT){
      digitalWrite(relayPinT, HIGH);
      relayStateT = 1;
-   }
-   if (OutputB > now - windowStartTime){
-     digitalWrite(relayPinB, HIGH);
-     relayStateB = 1;
+     digitalWrite(redLEDpinT, HIGH);
    }
    else{
      digitalWrite(relayPinT, LOW);
-     digitalWrite(relayPinB, LOW);
+     digitalWrite(redLEDpinT, LOW);
      relayStateT = 0;
+   }
+ }
+ void drive_outputB() {
+   unsigned long now = millis();
+   if(now - windowStartTimeB>WindowSizeB)
+   {
+     windowStartTimeB += WindowSizeB;
+   }
+   if (OutputB > now - windowStartTimeB){
+     digitalWrite(relayPinB, HIGH);
+     relayStateB = 1;
+     digitalWrite(redLEDpinB, HIGH);
+   }
+   else{
+     digitalWrite(relayPinB, LOW);
+     digitalWrite(redLEDpinB, LOW);
      relayStateB = 0;
    }
  }
+
  // =============================
  //  11.4 Tuning and calibrating
  // =============================
@@ -1117,7 +1190,7 @@ char message[] = "Sublimasjonspresse";
      lcd.setCursor(0,0);
       lcd.print("Kalib av ");
       lcd.setCursor(10,0);
-      lcd.print(byte(0));
+      lcd.write(byte(0));
       lcd.setCursor(11,0);
       lcd.print(" topp");
      lcd.setCursor(0,1);
@@ -1161,7 +1234,7 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(0,0);
         lcd.print("Kalib av ");
         lcd.setCursor(10,0);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(11,0);
         lcd.print(" bunn");
         lcd.setCursor(0,1);
@@ -1185,10 +1258,6 @@ char message[] = "Sublimasjonspresse";
         	if (tKB >= 0){
         		lcd.print("+");
         	}
-        //	if (tK < 0){
-        //		lcd.print("-");
-        //	}
-        // lcd.setCursor(14,1);
          lcd.print(tKB);
          lcd.write(byte(0));
 
@@ -1209,36 +1278,36 @@ char message[] = "Sublimasjonspresse";
         lcd.print("Endre set point");
         lcd.setCursor(0,1);
         lcd.print(">T:");
+        lcd.setCursor(3,1);
         if (setPointT >= 100){
-          lcd.setCursor(3,1);
         }
-        if(setPointT >= 10){
+        if(setPointT < 100){
           lcd.print(" ");
-          lcd.setCursor(4,1);
         }
-        if(setPointT < 10){
+        if (setPointT < 10){
           lcd.print("  ");
-          lcd.setCursor(5,1);
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (setPointB >= 100){
-          lcd.setCursor(10,1);
         }
-        if(setPointB >= 10){
+        if(setPointB < 100){
           lcd.print(" ");
-          lcd.setCursor(11,1);
         }
-        if(setPointB < 10){
+        if (setPointB < 10){
           lcd.print("  ");
-          lcd.setCursor(12,1);
         }
         lcd.print((byte)setPointB,DEC);
-        lcd.setCursor(13,1);
-        lcd.print(byte(0));
+        lcd.setCursor(14,1);
+        lcd.write(byte(0));
+        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+           lcd.clear();
+           opState = RUN_PID;
+           return;
+       }
       }
    // =============================
    //  11.5 Setpoint2
@@ -1248,36 +1317,36 @@ char message[] = "Sublimasjonspresse";
      lcd.print("Endre set point");
      lcd.setCursor(0,1);
      lcd.print(" T:");
+     lcd.setCursor(3,1);
      if (setPointT >= 100){
-       lcd.setCursor(3,1);
      }
-     if(setPointT >= 10){
+     if(setPointT < 100){
        lcd.print(" ");
-       lcd.setCursor(4,1);
      }
      if(setPointT < 10){
        lcd.print("  ");
-       lcd.setCursor(5,1);
      }
      lcd.print((byte)setPointT,DEC);
      lcd.setCursor(6,1);
-     lcd.print(byte(0));
+     lcd.write(byte(0));
      lcd.setCursor(8,1);
      lcd.print(">B:");
      if (setPointB >= 100){
-       lcd.setCursor(11,1);
      }
-     if(setPointB >= 10){
+     if(setPointB < 100){
        lcd.print(" ");
-       lcd.setCursor(12,1);
      }
      if(setPointB < 10){
        lcd.print("  ");
-       lcd.setCursor(13,1);
      }
      lcd.print((byte)setPointB,DEC);
      lcd.setCursor(14,1);
-     lcd.print(byte(0));
+     lcd.write(byte(0));
+     if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        lcd.clear();
+        opState = RUN_PID;
+        return;
+    }
    }
  // =============================
  //  11.6 Selecting program
@@ -1302,12 +1371,10 @@ char message[] = "Sublimasjonspresse";
         if (stimep >= 100){
           lcd.setCursor(4,0);
         }
-        if(stimep >= 10){
-          lcd.print(" ");
+        if(stimep < 99){
           lcd.setCursor(5,0);
         }
         if(stimep < 10){
-          lcd.print("  ");
           lcd.setCursor(6,0);
         }
         lcd.print((byte)stimep,DEC);
@@ -1316,35 +1383,37 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(1,1);
         lcd.print("T:");
         if (temptp >= 100){
-          lcd.setCursor(3,1);
+          lcd.setCursor(2,1);
         }
         if(temptp >= 10){
-          lcd.print(" ");
-          lcd.setCursor(4,1);
+          lcd.setCursor(3,1);
         }
         if(temptp < 10){
-          lcd.print("  ");
-          lcd.setCursor(5,1);
+          lcd.setCursor(4,1);
         }
         lcd.print((byte)temptp,DEC);
         lcd.setCursor(6,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (tempbp >= 100){
-          lcd.setCursor(11,1);
+          lcd.setCursor(10,1);
         }
         if(tempbp >= 10){
-          lcd.print(" ");
-          lcd.setCursor(12,1);
+          lcd.setCursor(11,1);
         }
         if(tempbp < 10){
-          lcd.print("  ");
-          lcd.setCursor(13,1);
+          lcd.setCursor(12,1);
         }
         lcd.print((byte)tempbp,DEC);
         lcd.setCursor(14,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
+
+            if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+               lcd.clear();
+               opState = RUN_PID;
+               //return;
+           }
       }
     // =============================
     //   11.8.1 Manual
@@ -1362,41 +1431,42 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(0,0);
         lcd.print(">Tid:");
         if (stime >= 100){
-          lcd.setCursor(5,0);
-        }
-        if(stime >= 10){
-          lcd.print(" ");
           lcd.setCursor(6,0);
+        }
+        if(stime <= 99){
+          lcd.print(" ");
+          lcd.setCursor(7,0);
         }
         if(stime < 10){
           lcd.print("  ");
-          lcd.setCursor(7,0);
+          lcd.setCursor(8,0);
         }
         lcd.print((byte)stime,DEC);
-        lcd.setCursor(8,0);
+        lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(1,1);
         lcd.print("T:");
+        lcd.setCursor(3,1);
         if (stime >= 100){
-          lcd.setCursor(3,1);
+
         }
-        if(setPointT >= 10){
+        if(setPointT <= 99){
           lcd.print(" ");
-          lcd.setCursor(4,1);
+
         }
         if(setPointT < 10){
           lcd.print("  ");
-          lcd.setCursor(5,1);
+
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (setPointB >= 100){
           lcd.setCursor(11,1);
         }
-        if(setPointB >= 10){
+        if(setPointB <= 99){
           lcd.print(" ");
           lcd.setCursor(12,1);
         }
@@ -1406,7 +1476,13 @@ char message[] = "Sublimasjonspresse";
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
+
+            if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+               lcd.clear();
+               opState = RUN_PID;
+               return;
+           }
       }
       // =============================
       //   11.8.1.2 Set temperature top
@@ -1415,25 +1491,25 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(1,0);
         lcd.print("Tid:");
         if (stime >= 100){
-          lcd.setCursor(5,0);
-        }
-        if(stime >= 10){
-          lcd.print(" ");
           lcd.setCursor(6,0);
+        }
+        if(stime < 99){
+          lcd.print(" ");
+          lcd.setCursor(7,0);
         }
         if(stime < 10){
           lcd.print("  ");
-          lcd.setCursor(7,0);
+          lcd.setCursor(8,0);
         }
         lcd.print((byte)stime,DEC);
-        lcd.setCursor(8,0);
+        lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(0,1);
         lcd.print(">T:");
         if (setPointT >= 100){
           lcd.setCursor(3,1);
         }
-        if(setPointT >= 10){
+        if(setPointT <= 99){
           lcd.print(" ");
           lcd.setCursor(4,1);
         }
@@ -1443,13 +1519,13 @@ char message[] = "Sublimasjonspresse";
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (setPointB >= 100){
           lcd.setCursor(11,1);
         }
-        if(setPointB >= 10){
+        if(setPointB <= 99){
           lcd.print(" ");
           lcd.setCursor(12,1);
         }
@@ -1459,7 +1535,12 @@ char message[] = "Sublimasjonspresse";
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
+        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+           lcd.clear();
+           opState = RUN_PID;
+           return;
+       }
       }
       // =============================
       //   11.8.1.3 Set temperature base
@@ -1468,51 +1549,50 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(1,0);
         lcd.print("Tid:");
         if (stime >= 100){
-          lcd.setCursor(5,0);
-        }
-        if(stime >= 10){
-          lcd.print(" ");
           lcd.setCursor(6,0);
         }
-        if(stime < 10){
-          lcd.print("  ");
+        if(stime <= 99){
           lcd.setCursor(7,0);
         }
+        if(stime < 10){
+          lcd.setCursor(8,0);
+        }
         lcd.print((byte)stime,DEC);
-        lcd.setCursor(8,0);
+        lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(1,1);
         lcd.print("T:");
         if (setPointT >= 100){
           lcd.setCursor(3,1);
         }
-        if(setPointT >= 10){
-          lcd.print(" ");
+        if(setPointT <= 99){
           lcd.setCursor(4,1);
         }
         if(setPointT < 10){
-          lcd.print("  ");
           lcd.setCursor(5,1);
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(">B:");
         if (setPointB >= 100){
           lcd.setCursor(11,1);
         }
-        if(setPointB >= 10){
-          lcd.print(" ");
+        if(setPointB <= 99){
           lcd.setCursor(12,1);
         }
         if(setPointB < 10){
-          lcd.print("  ");
           lcd.setCursor(13,1);
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
-        lcd.print(byte(0));
+        lcd.write(byte(0));
+        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+           lcd.clear();
+           opState = RUN_PID;
+           return;
+       }
       }
     // =============================
     //   11.8.2 Program 1
@@ -1588,7 +1668,7 @@ char message[] = "Sublimasjonspresse";
      delay(50);
      blinkNo++;
        }
-   delay(2000);
+   delay(1000);
    lcd.clear();
    opState = RUN_PID;
    run_pid();
@@ -1603,7 +1683,7 @@ tmpcB = thermocoupleB.readCelsius();
 tempAkumT = tempAkumT + tmpcT;
 tempAkumB = tempAkumB + tmpcB;
 readNo = readNo + 1;
- if (readNo >= 100){
+ if (readNo >= 7){
    tempAvgPrevT = tempAvgT;
    tempAvgT = ( tempAkumT/readNo);
    tempAvgT = tempAvgT + tKT;
@@ -1676,6 +1756,7 @@ void check_switches() {
         opState = SETPOINT1;
         break;
       case MANUALS:
+        lcd.clear();
         opState = C_MTIME;
         break;
       case PROGRAM:
@@ -1685,6 +1766,7 @@ void check_switches() {
         opState = C_PT;
         break;
       case TURN_OFF:
+      lcd.clear();
         opState = STARTUP;
         break;
       // Manual menu
@@ -1761,6 +1843,13 @@ void check_switches() {
         opState = RUN_PID;
         save_to_eeprom();
         break;
+      case SOLENOID:
+        digitalWrite(solenoidPin, LOW);
+        digitalWrite(solenoidled, LOW);
+        solenoidState = 0;
+        lcd.clear();
+        opState = RUN_PID;
+        break;
       }
     }
     // =============================
@@ -1791,16 +1880,10 @@ void check_switches() {
         stime = stime-1;
         break;
       case C_MTOP:
-        tKT = tKT-1;
-          if (tKT < -9){
-          tKT = -9;
-          }
+        setPointT = setPointT-1;
         break;
       case C_MBASE:
-         tKB = tKB-1;
-           if (tKB < -9){
-           tKB = -9;
-           }
+        setPointB = setPointB-1;
         break;
       // Program menu
       case START_PROG1:
@@ -1874,6 +1957,8 @@ void check_switches() {
             setPointB = 0;
           }
         break;
+        case SOLENOID:
+        break;
       }
     }
     // =============================
@@ -1904,16 +1989,10 @@ void check_switches() {
         stime = stime+1;
         break;
       case C_MTOP:
-        tKT = tKT+1;
-          if (tKT > 9){
-          tKT = 9;
-          }
+        setPointT = setPointT +1;
         break;
       case C_MBASE:
-        tKB = tKB+1;
-          if (tKB > 9){
-          tKB = 9;
-          }
+        setPointB = setPointB +1;
         break;
       // Program menu
       case START_PROG1:
@@ -1986,6 +2065,8 @@ void check_switches() {
           if (setPointB > 205){
             setPointB = 205;
           }
+        break;
+        case SOLENOID:
         break;
       }
     }
@@ -2068,6 +2149,8 @@ void check_switches() {
       case SETPOINT2:
         opState = SETPOINT1;
         break;
+        case SOLENOID:
+        break;
       }
     }
     // =============================
@@ -2149,22 +2232,60 @@ void check_switches() {
       case SETPOINT2:
         opState = SETPOINT1;
         break;
+        case SOLENOID:
+        break;
       }
     }
     //=============================
     // Solenoid
     //=============================
     void solenoid(){
-      if (opState = RUN_PID){
-      if (stime <= ticktime3){
+      if (stime-1 >= ticktime3){
       digitalWrite(solenoidPin, HIGH);
+      digitalWrite(solenoidled, HIGH);
+      solenoidState = 1;
+      lcd.setCursor(0,0);
+      lcd.print("Sublimerer ");
+      if (stime - ticktime3 < 100){
+        lcd.print(" ");
+      }
+      if (stime - ticktime3 < 10){
+        lcd.print("  ");
+      }
+      lcd.print(stime - ticktime3);
+      lcd.setCursor(0,1);
+      lcd.print("T: ");
+      if (tempAvgT != tempAvgPrevT) {
+       lcd.setCursor(3,1);
+       if (tempAvgT < 100){
+         lcd.print(" ");
+       }
+       lcd.print((byte)tempAvgT);
+       lcd.write(byte(0));
+     }
+    lcd.setCursor(7,1);
+    lcd.print(" B: ");
+     if (tempAvgB != tempAvgPrevB) {
+       lcd.setCursor(11,1);
+       if (tempAvgB < 100){
+         lcd.print("  ");
+       }
+       lcd.print((byte)tempAvgB);
+       lcd.write(byte(0));
+     }
+       run_pid_compute();
+
 
       }
-      if (stime > ticktime3){
+      else{
         digitalWrite(solenoidPin, LOW);
+        digitalWrite(solenoidled, LOW);
+        solenoidState = 0;
+        lcd.clear();
+        opState = STARTUP;
 
       }
-      }
+
     }
 // =============================
 //14 EEPROM
@@ -2239,10 +2360,10 @@ void check_switches() {
     // Use defaults if EEPROM values are invalid
     if (isnan(setPointT))
     {
-      setPointT = 170; // 60
+      setPointT = 150; // 60
     }
     if (isnan(setPointB)){
-      setPointB = 172;
+      setPointB = 152;
     }
     if (isnan(KpT))
     {
@@ -2307,4 +2428,55 @@ void check_switches() {
           *p++ = EEPROM.read(address++);
        }
        return value;
+    }
+
+// =============================
+// 15 Datalog
+// =============================
+    void logData()
+    {
+      char buffer[5];
+      Serial.print("#S|LOGTEMP|[");
+//Top
+      Serial.print(",");
+      Serial.print(itoa((tempAvgT), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((setPointT), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((relayStateT), buffer, 10));
+      Serial.print(",");
+
+        Serial.print(itoa((KpT), buffer, 10));
+        Serial.print(",");
+        Serial.print(itoa((KiT), buffer, 10));
+        Serial.print(",");
+        Serial.print(itoa((KdT), buffer, 10));
+
+      Serial.print(",");
+      Serial.print(itoa((InputT), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((OutputT), buffer, 10));
+      Serial.print(",");
+// Base
+      Serial.print(itoa((tempAvgB), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((setPointB), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((relayStateB), buffer, 10));
+      Serial.print(",");
+
+        Serial.print(itoa((KpB), buffer, 10));
+        Serial.print(",");
+        Serial.print(itoa((KiB), buffer, 10));
+        Serial.print(",");
+        Serial.print(itoa((KdB), buffer, 10));
+
+      Serial.print(",");
+      Serial.print(itoa((InputB), buffer, 10));
+      Serial.print(",");
+      Serial.print(itoa((OutputB), buffer, 10));
+      Serial.print(",");
+// Solenoid
+      Serial.print(itoa((solenoidState),buffer,10));
+      Serial.println("]#");
     }
