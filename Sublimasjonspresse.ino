@@ -324,9 +324,19 @@ void count(){
 TCNT3 = 49910; // Set to 1 second. Calculated as =65536-(16MHz/(1024 prescaler*1Hz))-1
 }
 SIGNAL(TIMER4_OVF_vect){
+<<<<<<< HEAD
   TCNT4 = 62410; // 5 Hz
 //  TCNT4 = 63303; // 7 Hz
   get_temp();
+=======
+  TCNT4 = 62410;
+  get_temp();
+  Serial.print("Topp: ");
+  Serial.print(tmpcT);
+  Serial.print(" Bunn: ");
+  Serial.println(tmpcB);
+
+>>>>>>> master
 //TCNT4= 13452;
 }
 // =============================
@@ -1293,12 +1303,21 @@ char message[] = "Sublimasjonspresse";
         lcd.setCursor(8,1);
         lcd.print(" B:");
         if (setPointB >= 100){
+<<<<<<< HEAD
+=======
+          lcd.setCursor(11,1);
+>>>>>>> master
         }
         if(setPointB < 100){
           lcd.print(" ");
+<<<<<<< HEAD
+=======
+          lcd.setCursor(12,1);
+>>>>>>> master
         }
         if (setPointB < 10){
           lcd.print("  ");
+<<<<<<< HEAD
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
@@ -1308,6 +1327,13 @@ char message[] = "Sublimasjonspresse";
            opState = RUN_PID;
            return;
        }
+=======
+          lcd.setCursor(13,1);
+        }
+        lcd.print((byte)setPointB,DEC);
+        lcd.setCursor(14,1);
+        lcd.print(byte(0));
+>>>>>>> master
       }
    // =============================
    //  11.5 Setpoint2
