@@ -73,6 +73,7 @@ Scetch layout
      13.1.3 Up
      13.1.4 Right
      13.1.5 Left
+     13.1.6 Lid Button
  14 EEPROM
    14.1 Saving
    14.2 Loading
@@ -491,8 +492,7 @@ void loop() {
         break;
       case 5:
         lcd.clear();
-        ticktime3 = 0;
-        opState = SOLENOID;
+        lidbutton();
     }
     justreleased[i]=0;
     }
@@ -1633,8 +1633,6 @@ char message[] = "Sublimasjonspresse";
       setPointB = p3tempB;
     }
  // =============================
-
-
  // 11.9 Shut down PID
  // =============================
  void turn_off(){
@@ -1670,7 +1668,7 @@ char message[] = "Sublimasjonspresse";
    delay(500);
 
  blinkNo = 0;
-   while(blinkNo < 10){
+   while(blinkNo < 5){
      lcd.clear(); // Av
      delay(50);
    lcd.print("Verdier lagret");// P?
@@ -1783,33 +1781,27 @@ void check_switches() {
       // Manual menu
       case C_MTIME:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case C_MTOP:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case C_MBASE:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       // Program menu
       case START_PROG1:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case START_PROG2:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case START_PROG3:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       // Calibrate menu
@@ -2244,6 +2236,87 @@ void check_switches() {
         opState = SETPOINT1;
         break;
         case SOLENOID:
+        break;
+      }
+    }
+    // =============================
+    // 13.1.6 Lid Button
+    // =============================
+    void lidbutton() {
+      switch (opState) {
+      // Main menu
+      case STARTUP:
+        opState = TURN_ON_PID;
+        break;
+      case TURN_ON_PID:
+        opState = RUN_PID;
+        break;
+      case RUN_PID:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      case TURN_OFF:
+        break;
+      case CALIBRATE:
+        break;
+      case PROGRAM:
+        break;
+      case MANUALS:
+        break;
+      // Manual menu
+      case C_MTIME:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      case C_MTOP:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      case C_MBASE:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      // Program menu
+      case START_PROG1:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      case START_PROG2:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      case START_PROG3:
+        ticktime3 = 0;
+        opState = SOLENOID;
+        break;
+      // Calibrate menu
+      case C_PT:
+        break;
+      case C_IT:
+        break;
+      case C_DT:
+        break;
+      case C_TMPT:
+        break;
+      case C_PB:
+        break;
+      case C_IB:
+        break;
+      case C_DB:
+        break;
+      case C_TMPB:
+        break;
+      // Setpoint menu
+      case SETPOINT1:
+        break;
+      case SETPOINT2:
+        break;
+      case SOLENOID:
+        digitalWrite(solenoidPin, LOW);
+        digitalWrite(solenoidled, LOW);
+        solenoidState = 0;
+        lcd.clear();
+        opState = RUN_PID;
         break;
       }
     }
