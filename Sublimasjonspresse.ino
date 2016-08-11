@@ -324,6 +324,8 @@ void count(){
   ticktime3 = ticktime3 +1;
 TCNT3 = 49910; // Set to 1 second. Calculated as =65536-(16MHz/(1024 prescaler*1Hz))-1
 }
+
+// Timer 4
 SIGNAL(TIMER4_OVF_vect){
 
   TCNT4 = 62410; // 5 Hz
