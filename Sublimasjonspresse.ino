@@ -215,8 +215,8 @@ int blinkNo;
   unsigned long windowStartTimeB;
 
   // Relay pin, control with optocoupler
-  #define relayPinT 28
-  #define relayPinB 30
+  #define relayPinT 28 // Orange
+  #define relayPinB 30 // Blue
   int relayStateT = 0; // Relay sate, 0 = off, 1 = on
   int relayStateB = 0; // Relay sate, 0 = off, 1 = on
   // Relay indication
@@ -227,15 +227,15 @@ int blinkNo;
   #include <SPI.h>
   #include "Adafruit_MAX31855.h"
   #include <Wire.h>
-  #define MAXDO   48
-  #define MAXCLK  50
-  #define MAXCST  51
-  #define MAXCSB  49
+  #define MAXDO   48 // White/Orange
+  #define MAXCSB  49 // Orange
+  #define MAXCLK  50 // White/Blue
+  #define MAXCST  51 // Blue
 
   Adafruit_MAX31855 thermocoupleT(MAXCLK, MAXCST, MAXDO);
   Adafruit_MAX31855 thermocoupleB(MAXCLK, MAXCSB, MAXDO);
 // Solenoid
-  #define solenoidPin 26
+  #define solenoidPin 26 // Green
   #define solenoidled 13
   int solenoidState = 0;
   int stime = 60;
@@ -1599,7 +1599,7 @@ blinkNo = 0;
     lcd.setCursor(0,0);
     lcd.print("Skru av varme?");
     lcd.setCursor(0,1);
-    lcd.print("Trykk 'set'");
+    lcd.print("Trykk set");
 
       if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
           PIDT.SetTunings(KpT,KiT,KdT);
@@ -2299,7 +2299,7 @@ void check_switches() {
         lcd.print(" ");
       }
       if (stime - ticktime3 < 10){
-        lcd.print("  ");
+        lcd.print(" ");
       }
       lcd.print(stime - ticktime3);
       lcd.setCursor(0,1);
