@@ -57,7 +57,6 @@ Scetch layout
      11.4.4 Manual calibrating of temperature sensor
        11.4.4.1 Top
        11.4.4.2 Base
-   11.5 Setting setpoint
    11.6 Selecting program
      11.6.1 Manual
      11.6.2 Thickness 1
@@ -159,15 +158,49 @@ byte pr[8] = {
   B00000,
 };
 
-// Degree (˚) -symbol
+// Degree (˚c) -symbol
 byte degr[8] = {
+  B01000,
+  B10100,
+  B01000,
+  B00011,
+  B00100,
+  B00100,
+  B00011,
+  B00000,
+};
+
+byte uparrow[8] = {
+  B00000,
+  B00100,
+  B01110,
+  B11111,
+  B00100,
+  B00100,
+  B00100,
+  B00000
+};
+
+byte downarrow[8] = {
+  B00000,
+  B00100,
+  B00100,
+  B00100,
+  B11111,
+  B01110,
+  B00100,
+  B00000
+};
+
+byte rightarrow[8] = {
+  B00000,
+  B00100,
   B00110,
-  B01001,
-  B01001,
+  B11111,
   B00110,
+  B00100,
   B00000,
-  B00000,
-  B00000,
+  B00000
 };
 
 // Norwegian symbols
@@ -199,7 +232,7 @@ int blinkNo;
   #include <PID_v1.h>
 
   // Define Variables we'll be connecting to
-  double setPointT, InputT, OutputT, setPointB, InputB, OutputB;
+  double setPointT, InputT, OutputT, setPointB, InputB, OutputB, stime;
 
   // PID tuning parameters
   double KpT, KiT, KdT, KpB, KiB, KdB;
@@ -215,13 +248,13 @@ int blinkNo;
   unsigned long windowStartTimeB;
 
   // Relay pin, control with optocoupler
-  #define relayPinT 28 // Orange
-  #define relayPinB 30 // Blue
+  #define relayPinB 28 // Orange
+  #define relayPinT 30 // Blue
   int relayStateT = 0; // Relay sate, 0 = off, 1 = on
   int relayStateB = 0; // Relay sate, 0 = off, 1 = on
   // Relay indication
-  #define redLEDpinT 6
-  #define redLEDpinB 5
+  #define redLEDpinT 2
+  #define redLEDpinB 3
 
 // Thermocouple - Adafruit_MAX31855
   #include <SPI.h>
@@ -236,10 +269,12 @@ int blinkNo;
   Adafruit_MAX31855 thermocoupleB(MAXCLK, MAXCSB, MAXDO);
 // Solenoid
   #define solenoidPin 26 // Green
-  #define solenoidled 13
+  #define solenoidled 4
   int solenoidState = 0;
-  int stime = 60;
-
+  int heatmode;
+  int heatap = 0;
+  int heatbp = 1;
+  int heaton = 2;
 // =============================
 // 04 States for PID-controller and temperature reader setup
 // =============================
@@ -247,7 +282,7 @@ int blinkNo;
 enum operatingState { STARTUP = 0,
  TURN_ON_PID, RUN_PID, C_PT, C_IT, C_DT, C_PB, C_IB, C_DB, C_MTOP, C_MBASE, C_MTIME,  START_PROG1,
  START_PROG2, START_PROG3, C_TMPT, C_TMPB, TURN_OFF,
- SETPOINT1, SETPOINT2, PROGRAM, CALIBRATE, MANUALS, SOLENOID
+ PROGRAM, CALIBRATE, MANUALS, SOLENOID, HEAT, HEATAP, HEATBP, HEATON
 };
 operatingState opState = STARTUP;
 
@@ -306,6 +341,12 @@ SIGNAL(TIMER2_OVF_vect) {
     digitalWrite(relayPinT, LOW);  // make sure relay is off
     digitalWrite(relayPinB, LOW);
   }
+  if (solenoidState == 1){
+    if (heatmode == 1){
+      digitalWrite(relayPinT, LOW);  // make sure relay is off
+      digitalWrite(relayPinB, LOW);
+    }
+  }
   else
   {
     drive_outputT();
@@ -319,8 +360,10 @@ SIGNAL(TIMER3_OVF_vect){
   count();
 }
 unsigned long ticktime3;
+unsigned long inputtime;
 void count(){
   ticktime3 = ticktime3 +1;
+  inputtime = inputtime +1;
 TCNT3 = 49910; // Set to 1 second. Calculated as =65536-(16MHz/(1024 prescaler*1Hz))-1
 }
 SIGNAL(TIMER4_OVF_vect){
@@ -372,6 +415,7 @@ windowStartTimeB = millis();
  relayStateT = 0;
  relayStateB = 0;
  solenoidState = 0;
+ heatmode = 0;
 
  // =============================
  // 08.4 LCD setup, custom symbols and splash screen
@@ -385,18 +429,15 @@ windowStartTimeB = millis();
  lcd.createChar(1, pr);
  lcd.createChar(2, oe);
  lcd.createChar(3, aa);
+ lcd.createChar(4, uparrow);
+ lcd.createChar(5, downarrow);
+ lcd.createChar(6, rightarrow);
 
  // Startup Splash-screen
  lcd.setCursor(4,0);
  lcd.print("EVI  Ski");
  lcd.setCursor(2,1);
  lcd.print("Sommer 2016");
- delay(2000);
-
- lcd.clear();
- lcd.print("Skript:");
- lcd.setCursor(0,1);
- lcd.print("Andreas Sandaa");
  delay(2000);
 
  lcd.clear();
@@ -468,26 +509,32 @@ void loop() {
     if (justreleased[i]){
       switch(i){
         case 0:
-          setValue();
+        inputtime = 0;
+        setValue();
         break;
         case 1:
         lcd.clear();
+        inputtime = 0;
         changeValueDown();
         break;
       case 2:
         lcd.clear();
+        inputtime = 0;
         changeScreenRight();
         break;
       case 3:
         lcd.clear();
+        inputtime = 0;
         changeValueUp();
         break;
       case 4:
         lcd.clear();
+        inputtime = 0;
         changeScreenLeft();
         break;
       case 5:
         lcd.clear();
+        inputtime = 0;
         ticktime3 = 0;
         Activate();
     }
@@ -523,8 +570,6 @@ void loop() {
  // =============================
  // 09.2 Operation state loop
  // =============================
-
-
  switch (opState) {
    // Main menu
   case STARTUP:
@@ -593,15 +638,20 @@ void loop() {
   case C_TMPB:
     c_tmpB();
     break;
-  // Setpoint menu
-  case SETPOINT1:
-    setpoint1();
-    break;
-  case SETPOINT2:
-    setpoint2();
-    break;
   case SOLENOID:
     solenoid();
+    break;
+  case HEAT:
+    heatselect();
+    break;
+  case HEATAP:
+    heatselectAP();
+    break;
+  case HEATBP:
+    heatselectBP();
+    break;
+  case HEATON:
+    heatselectON();
     break;
  }
  // =============================
@@ -614,15 +664,24 @@ if (printTime + printDelay <= millis()){
  // =============================
  // 09.4 Emergency shutoff
  // =============================
-/*
- if (tempAvgT >= 215){
+
+ if (tempAvgT > 239){
    emergency_off();
  }
- if (tempAvgB >= 215){
+ if (tempAvgB > 239){
    emergency_off();
  }
  delay(1);
-*/
+
+ // =============================
+ // 09.5 Auto off
+ // =============================
+ if (opState != STARTUP){
+ if (inputtime > 10800){
+   lcd.clear();
+   opState = STARTUP;
+ }
+ }
 }
 
 // =============================
@@ -689,10 +748,11 @@ blinkNo = 0;
    relayStateT = 0;
    digitalWrite(relayPinB, LOW);
    relayStateB = 0;
+   heatmode = heatap;
    lcd.setCursor(4,0);
    lcd.print("EVI  Ski");
-   lcd.setCursor(3,1);
-   lcd.print("Trykk set");
+   lcd.setCursor(1,1);
+   lcd.print("Trykk en knapp");
  }
 
 
@@ -713,7 +773,7 @@ blinkNo = 0;
  // =============================
  void run_pid() {
    lcd.setCursor(0,0);
-   lcd.print("Varmer, temp:");
+   lcd.print("Varmer:");
    lcd.setCursor(0,1);
    lcd.print("T: ");
    if (tempAvgT != tempAvgPrevT) {
@@ -722,7 +782,7 @@ blinkNo = 0;
       lcd.print(" ");
     }
     if (tempAvgT < 10){
-      lcd.print("  ");
+      lcd.print(" ");
     }
     lcd.print((byte)tempAvgT);
     lcd.setCursor(6,1);
@@ -736,7 +796,7 @@ blinkNo = 0;
       lcd.print(" ");
     }
     if (tempAvgB < 10){
-      lcd.print("  ");
+      lcd.print(" ");
     }
     lcd.print((byte)tempAvgB);
     lcd.setCursor(14,1);
@@ -800,7 +860,15 @@ blinkNo = 0;
     lcd.setCursor(0,0);
     lcd.print("For kalibrering");
     lcd.setCursor(0,1);
-    lcd.print("trykk set");
+    lcd.print("trykk ");
+    lcd.write(4);
+    lcd.write(" eller ");
+    lcd.write(5);
+    if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+        lcd.clear();
+        opState = RUN_PID;
+        return;
+    }
   }
    // =============================
    //  11.4.1 Tuning Kp
@@ -814,7 +882,7 @@ blinkNo = 0;
 
           // Printing Kp
           lcd.setCursor(0,1);
-          lcd.print(">");
+          lcd.write(6);
           lcd.setCursor(1,1);
           lcd.print("Kp");
           lcd.setCursor(3,1);
@@ -856,7 +924,7 @@ blinkNo = 0;
           }
           lcd.print(byte(KdT));
 
-         if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+         if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
              PIDT.SetTunings(KpT,KiT,KdT);
              lcd.clear();
              opState = RUN_PID;
@@ -872,7 +940,7 @@ blinkNo = 0;
 
            // Printing Kp
           lcd.setCursor(0,1);
-          lcd.print(">");
+          lcd.write(6);
           lcd.setCursor(1,1);
           lcd.print("Kp");
           lcd.setCursor(3,1);
@@ -914,7 +982,7 @@ blinkNo = 0;
           }
           lcd.print(byte(KdB));
 
-         if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+         if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
              PIDB.SetTunings(KpB,KiB,KdB);
              lcd.clear();
              opState = RUN_PID;
@@ -949,7 +1017,7 @@ blinkNo = 0;
 
          // Printing Ki
          lcd.setCursor(6,1);
-         lcd.print(">");
+         lcd.write(6);
          lcd.setCursor(7,1);
          lcd.print("Ki");
          lcd.setCursor(9,1);
@@ -975,7 +1043,7 @@ blinkNo = 0;
          }
          lcd.print(byte(KdT));
 
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
             PIDT.SetTunings(KpT,KiT,KdT);
             lcd.clear();
             opState = RUN_PID;
@@ -1007,7 +1075,7 @@ blinkNo = 0;
 
          // Printing Ki
          lcd.setCursor(6,1);
-         lcd.print(">");
+         lcd.write(6);
          lcd.setCursor(7,1);
          lcd.print("Ki");
          lcd.setCursor(9,1);
@@ -1033,7 +1101,7 @@ blinkNo = 0;
          }
          lcd.print(byte(KdB));
 
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
             PIDB.SetTunings(KpB,KiB,KdB);
             lcd.clear();
             opState = RUN_PID;
@@ -1081,7 +1149,7 @@ blinkNo = 0;
 
          // Printing Kd
          lcd.setCursor(11,1);
-         lcd.print(">");
+         lcd.write(6);
          lcd.setCursor(12,1);
          lcd.print("Kd");
          lcd.setCursor(14,1);
@@ -1094,7 +1162,7 @@ blinkNo = 0;
          }
          lcd.print(byte(KdT));
 
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
             PIDT.SetTunings(KpT,KiT,KdT);
             lcd.clear();
             opState = RUN_PID;
@@ -1138,7 +1206,7 @@ blinkNo = 0;
 
          // Printing Kd
          lcd.setCursor(11,1);
-         lcd.print(">");
+         lcd.write(6);
          lcd.setCursor(12,1);
          lcd.print("Kd");
          lcd.setCursor(14,1);
@@ -1151,7 +1219,7 @@ blinkNo = 0;
          }
          lcd.print(byte(KdB));
 
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
             PIDB.SetTunings(KpB,KiB,KdB);
             lcd.clear();
             opState = RUN_PID;
@@ -1189,14 +1257,15 @@ blinkNo = 0;
        }
      // Printing addition or subtraction of read temperature
       lcd.setCursor(9,1);
-      lcd.print(">tK ");
+      lcd.write(6);
+      lcd.print("tK ");
      	if (tKT >= 0){
      		lcd.print("+");
      	}
       lcd.print(tKT);
       lcd.write(byte(0));
 
-           if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+           if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
               lcd.clear();
               opState = RUN_PID;
               return;
@@ -1229,106 +1298,20 @@ blinkNo = 0;
           }
         // Printing addition or subtraction of read temperature
          lcd.setCursor(9,1);
-         lcd.print(">tK ");
+         lcd.write(6);
+         lcd.print("tK ");
         	if (tKB >= 0){
         		lcd.print("+");
         	}
          lcd.print(tKB);
          lcd.write(byte(0));
 
-              if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+              if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
                  lcd.clear();
                  opState = RUN_PID;
                  return;
              }
       }
- // =============================
- //  11.5 Setting setpoint
- // =============================
-   // =============================
-   //  11.5 Setpoint1
-   // =============================
-      void setpoint1(){
-        lcd.setCursor(0,0);
-        lcd.print("Endre set point");
-        lcd.setCursor(0,1);
-        lcd.print(">T:");
-        lcd.setCursor(3,1);
-        if (setPointT >= 100){
-
-        }
-        if(setPointT < 100){
-          lcd.print(" ");
-        }
-        if(setPointT < 10){
-          lcd.print("  ");
-        }
-        lcd.print((byte)setPointT,DEC);
-        lcd.setCursor(6,1);
-        lcd.write(byte(0));
-        lcd.setCursor(8,1);
-        lcd.print(" B:");
-        lcd.setCursor(11,1);
-        if (setPointB >= 100){
-
-        }
-        if(setPointB < 100){
-          lcd.print(" ");
-        }
-        if(setPointB < 10){
-          lcd.print("  ");
-        }
-        lcd.print((byte)setPointB,DEC);
-        lcd.setCursor(14,1);
-        lcd.write(byte(0));
-
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
-           lcd.clear();
-           opState = RUN_PID;
-           return;
-       }
-      }
-   // =============================
-   //  11.5 Setpoint2
-   // =============================
-   void setpoint2(){
-     lcd.setCursor(0,0);
-     lcd.print("Endre set point");
-     lcd.setCursor(0,1);
-     lcd.print(" T:");
-     lcd.setCursor(3,1);
-     if (setPointT >= 100){
-     }
-     if(setPointT < 100){
-       lcd.print(" ");
-     }
-     if(setPointT < 10){
-       lcd.print("  ");
-     }
-     lcd.print((byte)setPointT,DEC);
-     lcd.setCursor(6,1);
-     lcd.write(byte(0));
-     lcd.setCursor(8,1);
-     lcd.print(">B:");
-     lcd.setCursor(11,1);
-     if (setPointB >= 100){
-     }
-     if(setPointB < 100){
-       lcd.print(" ");
-     }
-     if(setPointB < 10){
-       lcd.print("  ");
-     }
-     lcd.print((byte)setPointB,DEC);
-     lcd.setCursor(14,1);
-     lcd.write(byte(0));
-
-     if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
-        lcd.clear();
-        opState = RUN_PID;
-        return;
-    }
-   }
  // =============================
  //  11.6 Selecting program
  // =============================
@@ -1343,7 +1326,15 @@ blinkNo = 0;
       lcd.setCursor(0,0);
       lcd.print("For program");
       lcd.setCursor(0,1);
-      lcd.print("trykk set");
+      lcd.print("trykk ");
+      lcd.write(4);
+      lcd.write(" eller ");
+      lcd.write(5);
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+          lcd.clear();
+          opState = RUN_PID;
+          return;
+      }
     }
     // Program routine
       int progrm(int stimep,int temptp,int tempbp){
@@ -1358,12 +1349,12 @@ blinkNo = 0;
         if(stimep < 10){
           lcd.print("  ");
         }
-        lcd.print((byte)stimep,DEC);
+        lcd.print(stimep);
         lcd.setCursor(7,0);
         lcd.print(" sekunder");
         lcd.setCursor(1,1);
         lcd.print("T:");
-        lcd.setCursor(2,1);
+        lcd.setCursor(3,1);
         if (temptp >= 100){
 
         }
@@ -1371,14 +1362,14 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(temptp < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)temptp,DEC);
         lcd.setCursor(6,1);
         lcd.write(byte(0));
         lcd.setCursor(8,1);
         lcd.print(" B:");
-        lcd.setCursor(10,1);
+        lcd.setCursor(11,1);
         if (tempbp >= 100){
 
         }
@@ -1386,7 +1377,7 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(tempbp < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)tempbp,DEC);
         lcd.setCursor(14,1);
@@ -1399,14 +1390,23 @@ blinkNo = 0;
       lcd.setCursor(0,0);
       lcd.print("For manuell");
       lcd.setCursor(0,1);
-      lcd.print("trykk set");
+      lcd.print("trykk ");
+      lcd.write(4);
+      lcd.write(" eller ");
+      lcd.write(5);
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+          lcd.clear();
+          opState = RUN_PID;
+          return;
+      }
     }
       // =============================
       //   11.8.1.1 Set time
       // =============================
       void c_mtime(){
         lcd.setCursor(0,0);
-        lcd.print(">Tid:");
+        lcd.write(6);
+        lcd.print("Tid:");
         lcd.setCursor(6,0);
         if (stime >= 100){
 
@@ -1415,21 +1415,21 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(stime < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
-        lcd.print((byte)stime,DEC);
+        lcd.print(stime,0);
         lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(1,1);
         lcd.print("T:");
         lcd.setCursor(3,1);
-        if (stime >= 100){
+        if (setPointT >= 100){
         }
         if(setPointT < 100){
           lcd.print(" ");
         }
         if(setPointT < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
@@ -1444,12 +1444,12 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(setPointB < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
         lcd.write(byte(0));
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
            lcd.clear();
            opState = RUN_PID;
            return;
@@ -1469,13 +1469,14 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(stime < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
-        lcd.print((byte)stime,DEC);
+        lcd.print(stime,0);
         lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(0,1);
-        lcd.print(">T:");
+        lcd.write(6);
+        lcd.print("T:");
         lcd.setCursor(3,1);
         if (setPointT >= 100){
         }
@@ -1483,7 +1484,7 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(setPointT < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
@@ -1498,12 +1499,12 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(setPointB < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
         lcd.write(byte(0));
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
            lcd.clear();
            opState = RUN_PID;
            return;
@@ -1523,28 +1524,28 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(stime < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
-        lcd.print((byte)stime,DEC);
+        lcd.print(stime,0);
         lcd.setCursor(9,0);
         lcd.print(" sek");
         lcd.setCursor(1,1);
         lcd.print("T:");
         lcd.setCursor(3,1);
         if (setPointT >= 100){
-
         }
         if(setPointT < 100){
           lcd.print(" ");
         }
         if(setPointT < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointT,DEC);
         lcd.setCursor(6,1);
         lcd.write(byte(0));
         lcd.setCursor(8,1);
-        lcd.print(">B:");
+        lcd.write(6);
+        lcd.print("B:");
         lcd.setCursor(11,1);
         if (setPointB >= 100){
 
@@ -1553,12 +1554,12 @@ blinkNo = 0;
           lcd.print(" ");
         }
         if(setPointB < 10){
-          lcd.print("  ");
+          lcd.print(" ");
         }
         lcd.print((byte)setPointB,DEC);
         lcd.setCursor(14,1);
         lcd.write(byte(0));
-        if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+        if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
            lcd.clear();
            opState = RUN_PID;
            return;
@@ -1569,27 +1570,33 @@ blinkNo = 0;
     // =============================
     void prog1() {
       progrm(p1time,p1tempT,p1tempB);
-      stime = p1time;
-      setPointT = p1tempT;
-      setPointB = p1tempB;
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+         lcd.clear();
+         opState = RUN_PID;
+         return;
+     }
     }
     // =============================
     //   11.8.3 Program 2
     // =============================
     void prog2() {
       progrm(p2time,p2tempT,p2tempB);
-      stime = p2time;
-      setPointT = p2tempT;
-      setPointB = p2tempB;
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+         lcd.clear();
+         opState = RUN_PID;
+         return;
+     }
     }
     // =============================
     //   11.8.4 Program 3
     // =============================
     void prog3() {
       progrm(p3time,p3tempT,p3tempB);
-      stime = p3time;
-      setPointT = p3tempT;
-      setPointB = p3tempB;
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+         lcd.clear();
+         opState = RUN_PID;
+         return;
+     }
     }
  // =============================
  // 11.9 Shut down PID
@@ -1599,9 +1606,9 @@ blinkNo = 0;
     lcd.setCursor(0,0);
     lcd.print("Skru av varme?");
     lcd.setCursor(0,1);
-    lcd.print("Trykk set");
+    lcd.print("Trykk midt");
 
-      if ((millis() - buttonPushTime) > 5000) {  // return to RUN after 5 seconds idle
+      if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
           PIDT.SetTunings(KpT,KiT,KdT);
           PIDB.SetTunings(KpB,KiB,KdB);
           lcd.clear();
@@ -1624,10 +1631,10 @@ blinkNo = 0;
    lcd.print("Verdier lagret");
    lcd.setCursor(0,1);
    lcd.print("til EEPROM");
-   delay(500);
+   delay(250);
 
  blinkNo = 0;
-   while(blinkNo < 10){
+   while(blinkNo < 4){
      lcd.clear(); // Av
      delay(50);
    lcd.print("Verdier lagret");// P?
@@ -1636,10 +1643,107 @@ blinkNo = 0;
      delay(50);
      blinkNo++;
        }
-   delay(1000);
+   delay(500);
    lcd.clear();
    opState = RUN_PID;
    run_pid();
+ }
+ // =============================
+ // 11.11 Heatmode
+ // =============================
+ void heatselect(){
+   lcd.setCursor(0,0);
+   lcd.print("For varmemodus");
+   lcd.setCursor(0,1);
+   lcd.print("trykk ");
+   lcd.write(4);
+   lcd.write(" eller ");
+   lcd.write(5);
+   if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+       lcd.clear();
+       opState = RUN_PID;
+       return;
+   }
+ }
+ void heatselected(){
+   lcd.setCursor(0,0);
+   lcd.print("Varmemodus:");
+  if (heatmode == 0) {
+   lcd.setCursor(3,1);
+   lcd.write(6);
+   lcd.setCursor(4,1);
+   lcd.print("EP");
+   }
+  if (heatmode == 1) {
+   lcd.setCursor(6,1);
+   lcd.write(6);
+   lcd.setCursor(7,1);
+   lcd.print("FP");
+   }
+  if (heatmode == 2) {
+   lcd.setCursor(10,1);
+   lcd.write(6);
+   lcd.setCursor(11,1);
+   lcd.print("Aldri");
+  }
+  delay(500);
+  lcd.clear();
+  opState = RUN_PID;
+ }
+ void heatselectAP(){
+   lcd.setCursor(0,0);
+   lcd.print("Varmemodus:");
+   lcd.setCursor(0,1);
+   lcd.print("Av:");
+   lcd.write(6);
+   lcd.setCursor(4,1);
+   lcd.print("EP");
+   lcd.setCursor(7,1);
+   lcd.print("FP");
+   lcd.setCursor(11,1);
+   lcd.print("Aldri");
+   if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+       lcd.clear();
+       opState = RUN_PID;
+       return;
+   }
+ }
+ void heatselectBP(){
+   lcd.setCursor(0,0);
+   lcd.print("Varmemodus:");
+   lcd.setCursor(0,1);
+   lcd.print("Av:");
+   lcd.setCursor(4,1);
+   lcd.print("EP");
+   lcd.write(6);
+   lcd.setCursor(7,1);
+   lcd.print("FP");
+   lcd.setCursor(11,1);
+   lcd.print("Aldri");
+   if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+       lcd.clear();
+       opState = RUN_PID;
+       return;
+   }
+ }
+ void heatselectON(){
+   lcd.setCursor(0,0);
+   lcd.print("Varmemodus:");
+   lcd.setCursor(0,1);
+   lcd.print("Av:");
+   lcd.setCursor(4,1);
+   lcd.print("EP");
+   lcd.setCursor(7,1);
+   lcd.print("FP");
+   lcd.setCursor(10,1);
+   lcd.write(6);
+   lcd.setCursor(11,1);
+   lcd.print("Aldri");
+   if ((millis() - buttonPushTime) > 2000) {  // return to RUN after 2 seconds idle
+       lcd.clear();
+       opState = RUN_PID;
+       return;
+   }
  }
 // =============================
 // 12 Temperature reading
@@ -1721,18 +1825,25 @@ void check_switches() {
         opState = RUN_PID;
         break;
       case RUN_PID:
-        opState = SETPOINT1;
+      lcd.clear();
+        opState = C_MTOP;
         break;
       case MANUALS:
       lcd.clear();
         opState = C_MTIME;
         break;
       case PROGRAM:
+      lcd.clear();
         opState = START_PROG1;
         break;
       case CALIBRATE:
+      lcd.clear();
         opState = C_PT;
         break;
+      case HEAT:
+      lcd.clear();
+        opState = HEATAP;
+      break;
       case TURN_OFF:
       lcd.clear();
         opState = STARTUP;
@@ -1740,33 +1851,36 @@ void check_switches() {
       // Manual menu
       case C_MTIME:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case C_MTOP:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case C_MBASE:
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       // Program menu
       case START_PROG1:
+        stime = p1time;
+        setPointT = p1tempT;
+        setPointB = p1tempB;
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case START_PROG2:
+        stime = p2time;
+        setPointT = p2tempT;
+        setPointB = p2tempB;
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       case START_PROG3:
+        stime = p3time;
+        setPointT = p3tempT;
+        setPointB = p3tempB;
         opState = RUN_PID;
-        ticktime3 = 0;
         save_to_eeprom();
         break;
       // Calibrate menu
@@ -1802,14 +1916,24 @@ void check_switches() {
         opState = RUN_PID;
         save_to_eeprom();
         break;
-      // Setpoint menu
-      case SETPOINT1:
+      // Heatmode menu
+      case HEATAP:
+        heatmode = heatap;
         opState = RUN_PID;
-        save_to_eeprom();
+        lcd.clear();
+        heatselected();
         break;
-      case SETPOINT2:
+      case HEATBP:
+        heatmode = heatbp;
         opState = RUN_PID;
-        save_to_eeprom();
+        lcd.clear();
+        heatselected();
+        break;
+      case HEATON:
+        heatmode = heaton;
+        opState = RUN_PID;
+        lcd.clear();
+        heatselected();
         break;
       case SOLENOID:
       digitalWrite(solenoidPin, LOW);
@@ -1835,23 +1959,37 @@ void check_switches() {
       case RUN_PID:
         break;
       case MANUALS:
+        opState = C_MTIME;
         break;
       case PROGRAM:
         opState = START_PROG1;
         break;
       case CALIBRATE:
+        opState = C_PT;
+        break;
+      case HEAT:
+        opState = HEATAP;
         break;
       case TURN_OFF:
         break;
       // Manual menu
       case C_MTIME:
         stime = stime-1;
+        if (stime < 0){
+          stime = 0;
+        }
         break;
       case C_MTOP:
         setPointT = setPointT-1;
+        if (setPointT < 0){
+          setPointT = 0;
+        }
         break;
       case C_MBASE:
         setPointB = setPointB-1;
+        if (setPointB < 0){
+          setPointB = 0;
+        }
         break;
       // Program menu
       case START_PROG1:
@@ -1912,20 +2050,14 @@ void check_switches() {
            tKB = -9;
            }
         break;
-      // Setpoint menu
-      case SETPOINT1:
-        setPointT = setPointT-1;
-          if (setPointT < 0){
-            setPointT = 0;
-          }
+      // Heatmode menu
+      case HEATAP:
         break;
-      case SETPOINT2:
-      setPointB = setPointB-1;
-          if (setPointB < 0){
-            setPointB = 0;
-          }
+      case HEATBP:
         break;
-        case SOLENOID:
+      case HEATON:
+        break;
+      case SOLENOID:
         break;
       }
     }
@@ -1944,23 +2076,37 @@ void check_switches() {
       case RUN_PID:
         break;
       case MANUALS:
+        opState = C_MBASE;
         break;
       case PROGRAM:
         opState = START_PROG3;
         break;
       case CALIBRATE:
+        opState = C_TMPB;
+        break;
+      case HEAT:
+        opState = HEATON;
         break;
       case TURN_OFF:
         break;
       // Manual menu
       case C_MTIME:
         stime = stime+1;
+        if (stime > 900){
+          stime = 900;
+        }
         break;
       case C_MTOP:
         setPointT = setPointT+1;
+        if (setPointT > 230){
+          setPointT = 230;
+        }
         break;
       case C_MBASE:
         setPointB = setPointB+1;
+        if (setPointB > 230){
+          setPointB = 230;
+        }
         break;
       // Program menu
       case START_PROG1:
@@ -2021,18 +2167,12 @@ void check_switches() {
            tKB = 9;
            }
         break;
-      // Setpoint menu
-      case SETPOINT1:
-        setPointT = setPointT+1;
-          if (setPointT > 205){
-            setPointT = 205;
-          }
+      // Heatmode menu
+      case HEATAP:
         break;
-      case SETPOINT2:
-      setPointB = setPointB+1;
-          if (setPointB > 205){
-            setPointB = 205;
-          }
+      case HEATBP:
+        break;
+      case HEATON:
         break;
       case SOLENOID:
         break;
@@ -2060,6 +2200,9 @@ void check_switches() {
         opState = CALIBRATE;
         break;
       case CALIBRATE:
+        opState = HEAT;
+        break;
+      case HEAT:
         opState = TURN_OFF;
         break;
       case TURN_OFF:
@@ -2110,12 +2253,15 @@ void check_switches() {
       case C_TMPB:
         opState = C_PT;
         break;
-      // Setpoint menu
-      case SETPOINT1:
-        opState = SETPOINT2;
+      // Heatmode menu
+      case HEATAP:
+        opState = HEATBP;
         break;
-      case SETPOINT2:
-        opState = SETPOINT1;
+      case HEATBP:
+        opState = HEATON;
+        break;
+      case HEATON:
+        opState = HEATAP;
         break;
       case SOLENOID:
         break;
@@ -2137,8 +2283,11 @@ void check_switches() {
         opState = TURN_OFF;
         break;
       case TURN_OFF:
-        opState = CALIBRATE;
+        opState = HEAT;
         break;
+      case HEAT:
+       opState = CALIBRATE;
+       break;
       case CALIBRATE:
         opState = PROGRAM;
         break;
@@ -2193,12 +2342,15 @@ void check_switches() {
       case C_TMPB:
         opState = C_DB;
         break;
-      // Setpoint menu
-      case SETPOINT1:
-        opState = SETPOINT2;
+      // Heatmode menu
+      case HEATAP:
+        opState = HEATON;
         break;
-      case SETPOINT2:
-        opState = SETPOINT1;
+      case HEATBP:
+        opState = HEATAP;
+        break;
+      case HEATON:
+        opState = HEATBP;
         break;
       case SOLENOID:
         break;
@@ -2271,10 +2423,12 @@ void check_switches() {
         break;
       case C_TMPB:
         break;
-      // Setpoint menu
-      case SETPOINT1:
+      // Heatmode menu
+      case HEATAP:
         break;
-      case SETPOINT2:
+      case HEATBP:
+        break;
+      case HEATON:
         break;
       case SOLENOID:
       digitalWrite(solenoidPin, LOW);
@@ -2289,6 +2443,8 @@ void check_switches() {
     // Solenoid
     //=============================
     void solenoid(){
+
+      if (heatmode == 0){
       if (stime-1 >= ticktime3){
       digitalWrite(solenoidPin, HIGH);
       digitalWrite(solenoidled, HIGH);
@@ -2301,7 +2457,7 @@ void check_switches() {
       if (stime - ticktime3 < 10){
         lcd.print(" ");
       }
-      lcd.print(stime - ticktime3);
+      lcd.print(stime - ticktime3,0);
       lcd.setCursor(0,1);
       lcd.print("T: ");
       if(tempAvgT != tempAvgPrevT){
@@ -2320,6 +2476,7 @@ void check_switches() {
           lcd.print(" ");
         }
         lcd.print((byte)tempAvgB);
+        lcd.setCursor(14,1);
         lcd.write(byte(0));
       }
       run_pid_compute();
@@ -2331,6 +2488,104 @@ void check_switches() {
         lcd.clear();
         opState = STARTUP;
       }
+    }
+    if (heatmode == 1){
+      if (stime-1 >= ticktime3){
+      digitalWrite(solenoidPin, HIGH);
+      digitalWrite(solenoidled, HIGH);
+      solenoidState = 1;
+      PIDT.SetMode(MANUAL);
+      digitalWrite(relayPinT, LOW);
+      relayStateT = 0;
+      digitalWrite(redLEDpinT, LOW);
+      PIDB.SetMode(MANUAL);
+      digitalWrite(relayPinB, LOW);
+      relayStateB = 0;
+      digitalWrite(redLEDpinB, LOW);
+      lcd.setCursor(0,0);
+      lcd.print("Sublimerer ");
+      if (stime - ticktime3 < 100){
+        lcd.print(" ");
+      }
+      if (stime - ticktime3 < 10){
+        lcd.print(" ");
+      }
+      lcd.print(stime - ticktime3,0);
+      lcd.setCursor(0,1);
+      lcd.print("");
+      if(tempAvgT != tempAvgPrevT){
+        lcd.setCursor(3,1);
+        if(tempAvgT < 100){
+          lcd.print(" ");
+        }
+        lcd.print((byte)tempAvgT);
+        lcd.write(byte(0));
+      }
+      lcd.setCursor(7,1);
+      lcd.print(" B: ");
+      if (tempAvgB != tempAvgPrevB){
+        lcd.setCursor(11,1);
+        if (tempAvgB < 100){
+          lcd.print(" ");
+        }
+        lcd.print((byte)tempAvgB);
+        lcd.setCursor(14,1);
+        lcd.write(byte(0));
+      }
+      }
+     else {
+        digitalWrite(solenoidPin, LOW);
+        digitalWrite(solenoidState, LOW);
+        solenoidState = 0;
+        lcd.clear();
+        opState = STARTUP;
+      }
+    }
+    if (heatmode == 2){
+      if (stime-1 >= ticktime3){
+      digitalWrite(solenoidPin, HIGH);
+      digitalWrite(solenoidled, HIGH);
+      solenoidState = 1;
+      lcd.setCursor(0,0);
+      lcd.print("Sublimerer ");
+      if (stime - ticktime3 < 100){
+        lcd.print(" ");
+      }
+      if (stime - ticktime3 < 10){
+        lcd.print(" ");
+      }
+      lcd.print(stime - ticktime3,0);
+      lcd.setCursor(0,1);
+      lcd.print("T: ");
+      if(tempAvgT != tempAvgPrevT){
+        lcd.setCursor(3,1);
+        if(tempAvgT < 100){
+          lcd.print(" ");
+        }
+        lcd.print((byte)tempAvgT);
+        lcd.write(byte(0));
+      }
+      lcd.setCursor(7,1);
+      lcd.print(" B: ");
+      if (tempAvgB != tempAvgPrevB){
+        lcd.setCursor(11,1);
+        if (tempAvgB < 100){
+          lcd.print(" ");
+        }
+        lcd.print((byte)tempAvgB);
+        lcd.setCursor(14,1);
+        lcd.write(byte(0));
+      }
+      run_pid_compute();
+      }
+     else {
+        digitalWrite(solenoidPin, LOW);
+        digitalWrite(solenoidState, LOW);
+        solenoidState = 0;
+        lcd.clear();
+        opState = RUN_PID;
+      }
+    }
     }
 // =============================
 //14 EEPROM
@@ -2383,6 +2638,10 @@ void check_switches() {
     {
        EEPROM_writeDouble(kdAddressb, KdB);
     }
+    if (stime != EEPROM_readDouble(stimAddressb))
+    {
+        EEPROM_writeDouble(stimAddressb, stime);
+    }
  }
  // =============================
  // 14.2 Loading
@@ -2402,6 +2661,7 @@ void check_switches() {
     KpB = EEPROM_readDouble(kpAddressb);
     KiB = EEPROM_readDouble(kiAddressb);
     KdB = EEPROM_readDouble(kdAddressb);
+    stime = EEPROM_readDouble(stimAddressb);
     // Use defaults if EEPROM values are invalid
     if (isnan(setPointT))
     {
@@ -2522,5 +2782,7 @@ void check_switches() {
       Serial.print(",");
 // Solenoid
       Serial.print(itoa((solenoidState),buffer,10));
-      Serial.println("]#");
+      Serial.print("]#");
+      Serial.print(itoa((heatmode),buffer,10));
+      Serial.println("###");
     }
